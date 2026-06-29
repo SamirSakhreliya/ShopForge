@@ -6,6 +6,9 @@ import swaggerUi from 'swagger-ui-express';
 import swaggerJsdoc from 'swagger-jsdoc';
 import path from 'path';
 import bodyParser from 'body-parser';
+import responseEnhancer from './Utils/Helpers/ResponseEnhancer';
+import authRoutes from './Routes/Auth.Routes';
+import testRoutes from './Routes/Test.Routes';
 
 dotenv.config();
 
@@ -29,6 +32,13 @@ export default class Server {
     app.use(bodyParser.json({ limit: '5mb' })); // Parse JSON bodies with a size limit
     app.use(bodyParser.urlencoded({ extended: true, limit: '5mb' }));
 
+    // Attach res.success / res.error + request logging
+    app.use(responseEnhancer);
+
+    // Routes
+    app.use(authRoutes);
+    app.use(testRoutes);
+
     const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
       console.error('Error:', err);
       res.status(500).json({
@@ -45,26 +55,38 @@ export default class Server {
       ? parseInt(process.env.PORT, 10)
       : 3000;
     const serverIP: string = process.env.SWAGGER_IP ?? '0.0.0.0';
-    const options = {
-      definition: {
-        openapi: '3.0.0',
-        info: {
-          title: 'ShopForge API Documentation',
-          version: '1.0.0',
-        },
-        servers: [
-          {
-            url: `http://localhost:${port}`,
-            description: 'Local server',
-          },
-          {
-            url: `http://${serverIP}:${port}`,
-            description: 'External server for network devices',
-          },
-        ],
+    const swaggerDefinition = {
+      openapi: '3.0.0',
+      info: {
+        title: 'ShopForge API Documentation',
+        version: '1.0.0',
       },
+      servers: [
+        {
+          url: `http://localhost:${port}`,
+          description: 'Local server',
+        },
+        {
+          url: `http://${serverIP}:${port}`,
+          description: 'External server for network devices',
+        },
+      ],
+      components: {
+        securitySchemes: {
+          bearerAuth: {
+            type: 'http',
+            scheme: 'bearer',
+            bearerFormat: 'JWT',
+            description:
+              'Paste the JWT from any login endpoint. Click Authorize at the top of the /docs page.',
+          },
+        },
+      },
+    };
+
+    const options = {
+      definition: swaggerDefinition,
       apis: [path.join(__dirname, './Routes/**/*.ts')],
-      // Path to the API route files for swagger-jsdoc to scan for annotations
     };
 
     // Initialize swagger-jsdoc

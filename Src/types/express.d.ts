@@ -8,8 +8,12 @@ declare global {
     }
 
     interface Request {
-      // Add custom properties here if needed
-      preferred_language?: string; // Example of adding a `user` property
+      preferred_language?: string;
+      user?: {
+        id: string;
+        role: string;
+        tenant_id: string | null;
+      };
     }
   }
 }

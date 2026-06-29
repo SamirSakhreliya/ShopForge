@@ -1,0 +1,779 @@
+{
+  "info": {
+    "name": "ShopForge — Auth & RBAC",
+    "_postman_id": "shopforge-auth-rbac-v1",
+    "description": "KAN-12: JWT auth + RBAC for Customer, Vendor, and SuperAdmin roles.\n\n## Seed credentials (Password@123 for all)\n- SuperAdmin: superadmin@shopforge.io\n- Vendor (TechGadgets Pro): vendor@techgadgetspro.com  |  tenant_id: a1b2c3d4-0001-0001-0001-000000000001\n- Vendor (Urban Threads): vendor@urbanthreads.io  |  tenant_id: a1b2c3d4-0001-0001-0001-000000000002\n- Customer (TechGadgets Pro): alice.chen@example.com  |  tenant_id: a1b2c3d4-0001-0001-0001-000000000001\n- Customer (Urban Threads): chloe.d@example.com  |  tenant_id: a1b2c3d4-0001-0001-0001-000000000002\n\n## Workflow\n1. Run a login request — the test script saves the token to {{token}} automatically.\n2. All protected requests read {{token}}.\n3. Customer login requires {{tenant_id}} — same email can exist on different storefronts.\n4. Set {{baseUrl}} to your server, e.g. http://localhost:4000",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    { "key": "baseUrl", "value": "http://localhost:4000", "type": "string" },
+    { "key": "token", "value": "", "type": "string" },
+    {
+      "key": "tenant_id",
+      "value": "a1b2c3d4-0001-0001-0001-000000000001",
+      "type": "string",
+      "description": "Active tenant ID (TechGadgets Pro). Change to test Urban Threads."
+    }
+  ],
+  "item": [
+    {
+      "name": "🌐 Public — Registration & Login",
+      "description": "No authentication required.",
+      "item": [
+        {
+          "name": "Vendor — Register (creates storefront + user)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('success flag true', () => pm.expect(pm.response.json().success).to.be.true);",
+                  "if (pm.response.code === 201) {",
+                  "  const t = pm.response.json().data.tenant;",
+                  "  pm.collectionVariables.set('tenant_id', t.id);",
+                  "  console.log('New tenant_id saved:', t.id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Alice\",\n  \"last_name\": \"Vendor\",\n  \"email\": \"alice.vendor@example.com\",\n  \"password\": \"Password@123\",\n  \"store_name\": \"Alice's Gadgets\",\n  \"store_slug\": \"alices-gadgets\",\n  \"contact_email\": \"hello@alicesgadgets.com\",\n  \"contact_phone\": \"+1-415-555-9999\",\n  \"business_address\": \"123 Market St, San Francisco, CA\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/vendor/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "vendor", "register"]
+            }
+          }
+        },
+        {
+          "name": "Vendor — Login (seed: TechGadgets Pro)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('token present', () => pm.expect(pm.response.json().data.token).to.be.a('string'));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('token', pm.response.json().data.token);",
+                  "  console.log('Vendor token saved. tenant_id:', pm.response.json().data.user.tenant_id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"vendor@techgadgetspro.com\",\n  \"password\": \"Password@123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/vendor/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "vendor", "login"]
+            }
+          }
+        },
+        {
+          "name": "Customer — Register (on TechGadgets Pro storefront)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('201 Created', () => pm.response.to.have.status(201));",
+                  "pm.test('success flag true', () => pm.expect(pm.response.json().success).to.be.true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Bob\",\n  \"last_name\": \"Customer\",\n  \"email\": \"bob.new@example.com\",\n  \"password\": \"Password@123\",\n  \"tenant_id\": \"{{tenant_id}}\",\n  \"phone\": \"+1-415-555-1234\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/users/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "users", "register"]
+            }
+          }
+        },
+        {
+          "name": "Customer — Login (seed: alice.chen on TechGadgets Pro)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('token present', () => pm.expect(pm.response.json().data.token).to.be.a('string'));",
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('token', pm.response.json().data.token);",
+                  "  console.log('Customer token saved');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice.chen@example.com\",\n  \"password\": \"Password@123\",\n  \"tenant_id\": \"{{tenant_id}}\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/users/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "users", "login"]
+            }
+          }
+        },
+        {
+          "name": "SuperAdmin — Login",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('token present', () => pm.expect(pm.response.json().data.token).to.be.a('string'));",
+                  "pm.test('tenant_id is null', () => pm.expect(pm.response.json().data.user.tenant_id).to.be.null);",
+                  "if (pm.response.code === 200) {",
+                  "  pm.collectionVariables.set('token', pm.response.json().data.token);",
+                  "  console.log('SuperAdmin token saved');",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"superadmin@shopforge.io\",\n  \"password\": \"Password@123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/superadmin/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "superadmin", "login"]
+            }
+          }
+        },
+        {
+          "name": "[Negative] Register — missing required field (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('400 Validation error', () => pm.response.to.have.status(400));",
+                  "pm.test('success is false', () => pm.expect(pm.response.json().success).to.be.false);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"incomplete@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/users/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "users", "register"]
+            }
+          }
+        },
+        {
+          "name": "[Negative] Customer login — missing tenant_id (400)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('400 Validation error', () => pm.response.to.have.status(400));",
+                  "pm.test('success is false', () => pm.expect(pm.response.json().success).to.be.false);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"alice.chen@example.com\",\n  \"password\": \"Password@123\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/users/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "users", "login"]
+            }
+          }
+        },
+        {
+          "name": "[Negative] Login — wrong password (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('401 Invalid credentials', () => pm.response.to.have.status(401));",
+                  "pm.test('success is false', () => pm.expect(pm.response.json().success).to.be.false);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"vendor@techgadgetspro.com\",\n  \"password\": \"WrongPassword\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/vendor/login",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "vendor", "login"]
+            }
+          }
+        },
+        {
+          "name": "[Negative] Vendor register — slug taken (409)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('409 Conflict', () => pm.response.to.have.status(409));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "POST",
+            "header": [{ "key": "Content-Type", "value": "application/json" }],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"first_name\": \"Duplicate\",\n  \"last_name\": \"Vendor\",\n  \"email\": \"new.vendor2@example.com\",\n  \"password\": \"Password@123\",\n  \"store_name\": \"Another Gadgets\",\n  \"store_slug\": \"techgadgets-pro\",\n  \"contact_email\": \"dup@example.com\"\n}"
+            },
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/vendor/register",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "vendor", "register"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "👤 Customer",
+      "description": "Requires a Customer JWT in {{token}}.\nRun 'Customer — Login' first.\nSeed: alice.chen@example.com / Password@123 on tenant a1b2c3d4-0001-0001-0001-000000000001",
+      "item": [
+        {
+          "name": "GET /api/v2/me — identity check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('role is Customer', () => pm.expect(pm.response.json().data.user.role).to.equal('Customer'));",
+                  "pm.test('tenant_id present', () => pm.expect(pm.response.json().data.user.tenant_id).to.not.be.null);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "me"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v2/users/profile — Customer profile (Customer only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/users/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "users", "profile"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v2/products — Customer + Vendor allowed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "products"]
+            }
+          }
+        },
+        {
+          "name": "[Negative] Customer → Vendor dashboard (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));",
+                  "pm.test('success false', () => pm.expect(pm.response.json().success).to.be.false);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/vendor/dashboard",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "vendor", "dashboard"]
+            }
+          }
+        },
+        {
+          "name": "[Negative] Customer → SuperAdmin dashboard (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/superadmin/dashboard",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "superadmin", "dashboard"]
+            }
+          }
+        },
+        {
+          "name": "[Negative] No token → protected route (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/users/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "users", "profile"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🏪 Vendor",
+      "description": "Requires a Vendor JWT in {{token}}.\nRun 'Vendor — Login' first.\nSeed: vendor@techgadgetspro.com / Password@123",
+      "item": [
+        {
+          "name": "GET /api/v2/me — identity check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('role is Vendor', () => pm.expect(pm.response.json().data.user.role).to.equal('Vendor'));",
+                  "pm.test('tenant_id present (vendor owns their storefront)', () => pm.expect(pm.response.json().data.user.tenant_id).to.not.be.null);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "me"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/vendor/dashboard — Vendor only",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/vendor/dashboard",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "vendor", "dashboard"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v2/products — Customer + Vendor allowed",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "products"]
+            }
+          }
+        },
+        {
+          "name": "[Negative] Vendor → Customer profile (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/users/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "users", "profile"]
+            }
+          }
+        },
+        {
+          "name": "[Negative] Vendor → SuperAdmin dashboard (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/superadmin/dashboard",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "superadmin", "dashboard"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔑 SuperAdmin",
+      "description": "Requires a SuperAdmin JWT in {{token}}.\nRun 'SuperAdmin — Login' first.\nSeed: superadmin@shopforge.io / Password@123  |  tenant_id = null",
+      "item": [
+        {
+          "name": "GET /api/v2/me — identity check",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('role is SuperAdmin', () => pm.expect(pm.response.json().data.user.role).to.equal('SuperAdmin'));",
+                  "pm.test('tenant_id is null', () => pm.expect(pm.response.json().data.user.tenant_id).to.be.null);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "me"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v1/superadmin/dashboard — SuperAdmin only",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "pm.test('success true', () => pm.expect(pm.response.json().success).to.be.true);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/superadmin/dashboard",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "superadmin", "dashboard"]
+            }
+          }
+        },
+        {
+          "name": "[Negative] SuperAdmin → Customer profile (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/users/profile",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "users", "profile"]
+            }
+          }
+        },
+        {
+          "name": "[Negative] SuperAdmin → Vendor dashboard (403)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/vendor/dashboard",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "vendor", "dashboard"]
+            }
+          }
+        },
+        {
+          "name": "[Negative] SuperAdmin → products (403 — Customer+Vendor only)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "products"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "🔀 Cross-Role",
+      "description": "Token-agnostic assertions. Swap {{token}} between roles to verify the matrix.",
+      "item": [
+        {
+          "name": "GET /api/v2/me — any authenticated user",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('200 OK', () => pm.response.to.have.status(200));",
+                  "const role = pm.response.json().data.user.role;",
+                  "pm.test('role is one of the three', () => {",
+                  "  pm.expect(['Customer','Vendor','SuperAdmin']).to.include(role);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "me"]
+            }
+          }
+        },
+        {
+          "name": "GET /api/v2/products — Customer+Vendor pass, SuperAdmin gets 403",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const status = pm.response.code;",
+                  "pm.test('200 (Customer|Vendor) or 403 (SuperAdmin)', () => {",
+                  "  pm.expect([200, 403]).to.include(status);",
+                  "});"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [{ "key": "Authorization", "value": "Bearer {{token}}" }],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/products",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "products"]
+            }
+          }
+        },
+        {
+          "name": "[Negative] Malformed token (401)",
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));",
+                  "pm.test('success false', () => pm.expect(pm.response.json().success).to.be.false);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ],
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer this.is.not.a.valid.jwt"
+              }
+            ],
+            "url": {
+              "raw": "{{baseUrl}}/api/v2/me",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v2", "me"]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
