@@ -2,20 +2,23 @@ import Joi from 'joi';
 
 // ─── Customer ───────────────────────────────────────────────────────────────
 
+// Customer identity is global (one account across every vendor storefront).
+// tenant_id is optional here — if the customer is signing up while browsing
+// a specific vendor's storefront, passing it creates a customer_vendor_links
+// row so that vendor sees them as a known customer immediately.
 export const customerRegisterSchema = Joi.object({
   first_name: Joi.string().min(1).max(80).required(),
   last_name: Joi.string().min(1).max(80).required(),
   email: Joi.string().email().required(),
   password: Joi.string().min(8).required(),
-  tenant_id: Joi.string().uuid().required(), // the vendor's storefront being registered on
+  tenant_id: Joi.string().uuid().optional(), // optional: storefront to auto-link on signup
   phone: Joi.string().max(30).optional(),
 });
 
-// Customer login must be scoped to a tenant — same email can exist on multiple storefronts
+// Customer login is global — one account works across all storefronts.
 export const customerLoginSchema = Joi.object({
   email: Joi.string().email().required(),
   password: Joi.string().required(),
-  tenant_id: Joi.string().uuid().required(),
 });
 
 // ─── Vendor ──────────────────────────────────────────────────────────────────

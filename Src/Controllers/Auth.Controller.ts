@@ -4,7 +4,8 @@ import { authService } from '../Services/Auth.Service';
 class AuthController {
   /**
    * POST /api/v2/users/register
-   * Register a new Customer on a vendor's storefront.
+   * Register a new Customer. Identity is global (one account across every
+   * vendor storefront); pass tenant_id to auto-link to a storefront on signup.
    */
   registerCustomer = async (req: Request, res: Response): Promise<void> => {
     try {
@@ -15,7 +16,7 @@ class AuthController {
       if (e.statusCode === 404) {
         res.error(e.message ?? 'Not found', err, 404);
       } else if (e.code === '23505') {
-        res.error('Email already registered on this storefront', err, 409);
+        res.error('Email already registered', err, 409);
       } else {
         res.error('Registration failed', err, 500);
       }
@@ -46,7 +47,8 @@ class AuthController {
 
   /**
    * POST /api/v2/users/login
-   * Login for Customers. Requires tenant_id — email is unique per storefront, not globally.
+   * Login for Customers. Global identity — email is unique platform-wide, one
+   * account shops across every vendor storefront.
    */
   loginCustomer = async (req: Request, res: Response): Promise<void> => {
     try {
