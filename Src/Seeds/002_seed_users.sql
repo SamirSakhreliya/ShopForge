@@ -1,7 +1,8 @@
 -- ============================================================
 -- Seed: Users
 -- 1 SuperAdmin (no tenant), 2 Vendors (one per active tenant),
--- 4 Customers across the two active tenants.
+-- 4 Customers with global accounts (tenant_id = NULL — see
+-- 007_seed_customer_vendor_links.sql for their storefront links).
 --
 -- Passwords are bcrypt hashes of 'Password@123' (cost 10).
 -- ============================================================
@@ -48,11 +49,13 @@ INSERT INTO user_management.users (id, tenant_id, email, password_hash, role, fi
   TRUE
 );
 
--- Customers for TechGadgets Pro
+-- Customers — global accounts, tenant_id = NULL.
+-- Alice & Bob shopped at TechGadgets Pro; Chloe & Daniel at Urban Threads
+-- (see 007_seed_customer_vendor_links.sql for the actual relationships).
 INSERT INTO user_management.users (id, tenant_id, email, password_hash, role, first_name, last_name, phone, is_active, is_email_verified) VALUES
 (
   'b1b2c3d4-0002-0002-0002-000000000004',
-  'a1b2c3d4-0001-0001-0001-000000000001',
+  NULL,
   'alice.chen@example.com',
   '$2b$10$X9vQz1LmNpKqRtUoWyXeAeHjJkLmNpQrStUvWxYzAbCdEfGhIjKl',
   'Customer',
@@ -64,7 +67,7 @@ INSERT INTO user_management.users (id, tenant_id, email, password_hash, role, fi
 ),
 (
   'b1b2c3d4-0002-0002-0002-000000000005',
-  'a1b2c3d4-0001-0001-0001-000000000001',
+  NULL,
   'bob.martinez@example.com',
   '$2b$10$X9vQz1LmNpKqRtUoWyXeAeHjJkLmNpQrStUvWxYzAbCdEfGhIjKl',
   'Customer',
@@ -73,13 +76,10 @@ INSERT INTO user_management.users (id, tenant_id, email, password_hash, role, fi
   '+1-415-555-2002',
   TRUE,
   FALSE
-);
-
--- Customers for Urban Threads
-INSERT INTO user_management.users (id, tenant_id, email, password_hash, role, first_name, last_name, phone, is_active, is_email_verified) VALUES
+),
 (
   'b1b2c3d4-0002-0002-0002-000000000006',
-  'a1b2c3d4-0001-0001-0001-000000000002',
+  NULL,
   'chloe.d@example.com',
   '$2b$10$X9vQz1LmNpKqRtUoWyXeAeHjJkLmNpQrStUvWxYzAbCdEfGhIjKl',
   'Customer',
@@ -91,7 +91,7 @@ INSERT INTO user_management.users (id, tenant_id, email, password_hash, role, fi
 ),
 (
   'b1b2c3d4-0002-0002-0002-000000000007',
-  'a1b2c3d4-0001-0001-0001-000000000002',
+  NULL,
   'dan.okafor@example.com',
   '$2b$10$X9vQz1LmNpKqRtUoWyXeAeHjJkLmNpQrStUvWxYzAbCdEfGhIjKl',
   'Customer',

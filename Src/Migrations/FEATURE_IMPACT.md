@@ -32,14 +32,15 @@
 
 ### Module 2 — Users & Auth
 
-| Feature                                                          | Score | Justification                                                                                                                                                   |
-| ---------------------------------------------------------------- | ----- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **Customer registration & login**                                | 10/10 | No auth = no orders. Every revenue flow starts here. A broken login page is an immediate 100 % revenue outage for that tenant.                                  |
-| **Vendor login**                                                 | 10/10 | Vendors can't manage orders, update stock, or configure their storefront without this. Complete operational paralysis.                                          |
-| **SuperAdmin login**                                             | 8/10  | Required for platform maintenance and tenant management. Not customer-visible but an operational necessity on day 1.                                            |
-| **JWT refresh token rotation**                                   | 7/10  | Session hijacking risk without it. Post-breach, no way to force-logout a compromised account. Low-friction attack vector for stolen tokens.                     |
-| **Email verification flag**                                      | 5/10  | Reduces spam/fake accounts. Not blocking for MVP but unverified accounts degrade email deliverability and trustworthiness of notifications over time.           |
-| **Role-based access control** (Vendor vs Customer vs SuperAdmin) | 9/10  | A customer who can edit another customer's order, or read vendor cost prices, is a critical security hole. RBAC must be airtight before exposing any endpoints. |
+| Feature                                                          | Score | Justification                                                                                                                                                                                            |
+| ---------------------------------------------------------------- | ----- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Customer registration & login** (global account)               | 10/10 | No auth = no orders. Every revenue flow starts here. Since Customer identity is now global (one account, all storefronts), a broken login page is a platform-wide revenue outage, not just one tenant's. |
+| **Customer-Vendor linking** (`customer_vendor_links`)            | 6/10  | Not blocking for checkout itself, but without it vendors lose "my customers" visibility since Customer rows are no longer tenant-scoped.                                                                 |
+| **Vendor login**                                                 | 10/10 | Vendors can't manage orders, update stock, or configure their storefront without this. Complete operational paralysis.                                                                                   |
+| **SuperAdmin login**                                             | 8/10  | Required for platform maintenance and tenant management. Not customer-visible but an operational necessity on day 1.                                                                                     |
+| **JWT refresh token rotation**                                   | 7/10  | Session hijacking risk without it. Post-breach, no way to force-logout a compromised account. Low-friction attack vector for stolen tokens.                                                              |
+| **Email verification flag**                                      | 5/10  | Reduces spam/fake accounts. Not blocking for MVP but unverified accounts degrade email deliverability and trustworthiness of notifications over time.                                                    |
+| **Role-based access control** (Vendor vs Customer vs SuperAdmin) | 9/10  | A customer who can edit another customer's order, or read vendor cost prices, is a critical security hole. RBAC must be airtight before exposing any endpoints.                                          |
 
 ---
 

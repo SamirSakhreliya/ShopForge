@@ -8,14 +8,15 @@
 
 ## Module Map
 
-| #   | Migration file         | Tables defined                                  |
-| --- | ---------------------- | ----------------------------------------------- |
-| 1   | `001_tenants.sql`      | `tenants`                                       |
-| 2   | `002_users.sql`        | `users`, `refresh_tokens`                       |
-| 3   | `003_categories.sql`   | `categories`                                    |
-| 4   | `004_products.sql`     | `products`, `product_images`                    |
-| 5   | `005_orders.sql`       | `orders`, `order_items`, `order_status_history` |
-| 6   | `006_app_settings.sql` | `app_settings`, `notifications_log`             |
+| #   | Migration file                  | Tables defined                                  |
+| --- | ------------------------------- | ----------------------------------------------- |
+| 1   | `001_tenants.sql`               | `tenants`                                       |
+| 2   | `002_users.sql`                 | `users`, `refresh_tokens`                       |
+| 3   | `003_categories.sql`            | `categories`                                    |
+| 4   | `004_products.sql`              | `products`, `product_images`                    |
+| 5   | `005_orders.sql`                | `orders`, `order_items`, `order_status_history` |
+| 6   | `006_app_settings.sql`          | `app_settings`, `notifications_log`             |
+| 7   | `007_customer_vendor_links.sql` | `customer_vendor_links` (+ alters `users`)      |
 
 ---
 
@@ -23,8 +24,9 @@
 
 ```
 tenants
-  ├── users  (tenant_id → tenants.id)
-  │     └── refresh_tokens  (user_id → users.id)
+  ├── users  (tenant_id → tenants.id; NULL for Customer + SuperAdmin, set for Vendor)
+  │     ├── refresh_tokens  (user_id → users.id)
+  │     └── customer_vendor_links  (customer_id → users.id, tenant_id → tenants.id)
   ├── categories  (tenant_id → tenants.id, parent_id → categories.id)
   ├── products  (tenant_id → tenants.id, category_id → categories.id)
   │     └── product_images  (product_id → products.id)
@@ -69,13 +71,15 @@ The root entity. Every vendor who opens a storefront is a tenant. The system is 
 
 ### `users`
 
-Single table for all human actors. Role determines access level; `tenant_id` is NULL only for `SuperAdmin`.
+Single table for all human actors. Role determines access level.
+
+**Identity model (as of migration 7):** `tenant_id` is NULL for `Customer` and `SuperAdmin` — both have a single global account. Only `Vendor` carries a real `tenant_id`, since a vendor owns exactly one storefront. Customer ↔ Vendor shopping relationships live in `customer_vendor_links`, not on the user row.
 
 | Column                     | Type                   | Notes                                                     |
 | -------------------------- | ---------------------- | --------------------------------------------------------- |
 | `id`                       | UUID PK                |                                                           |
-| `tenant_id`                | UUID FK → `tenants.id` | NULL for SuperAdmin                                       |
-| `email`                    | VARCHAR(255)           | Unique per `(tenant_id, email)` pair                      |
+| `tenant_id`                | UUID FK → `tenants.id` | NULL for Customer and SuperAdmin; set for Vendor          |
+| `email`                    | VARCHAR(255)           | Globally unique per role (partial unique indexes)         |
 | `password_hash`            | TEXT                   | bcrypt hash                                               |
 | `role`                     | ENUM                   | `Customer` · `Vendor` · `SuperAdmin`                      |
 | `first_name` / `last_name` | VARCHAR(80)            |                                                           |
@@ -88,9 +92,9 @@ Single table for all human actors. Role determines access level; `tenant_id` is 
 
 **Use cases:**
 
-- A customer at TechGadgets Pro and a customer at Urban Threads can share the same email — they are separate rows with different `tenant_id` values.
-- `SuperAdmin` has a globally unique email enforced by a partial unique index (`WHERE role = 'SuperAdmin'`).
-- `authenticate` middleware decodes JWT → looks up this table → attaches `{ id, role, tenant_id }` to `req.user`.
+- A Customer registers once and shops across every vendor storefront on the platform with the same account — no per-storefront signup.
+- `Customer` and `SuperAdmin` each have a globally unique email enforced by partial unique indexes (`idx_users_customer_email`, `idx_users_superadmin_email`). `Vendor` email is likewise globally unique (`idx_users_vendor_email`).
+- `authenticate` middleware decodes JWT → looks up this table → attaches `{ id, role, tenant_id }` to `req.user`. For Customer tokens, `tenant_id` is always `null`.
 
 ### `refresh_tokens`
 
@@ -275,6 +279,27 @@ Persistent record of every outbound notification.
 - Retry logic: a cron job picks up `status = 'queued'` or `status = 'failed'` rows and re-sends.
 - Deduplication: before firing a Slack alert, check for a recent `sent` entry to avoid spamming.
 - Support can audit exactly which notifications a customer received for a given order.
+
+---
+
+## Module 7 — Customer-Vendor Links (`007_customer_vendor_links.sql`)
+
+### `customer_vendor_links`
+
+Many-to-many join between global Customer accounts and the Vendor storefronts (tenants) they've interacted with. Created when this migration reworked Customer identity from tenant-scoped to platform-global.
+
+| Column                            | Type                   | Notes                                 |
+| --------------------------------- | ---------------------- | ------------------------------------- |
+| `customer_id`                     | UUID FK → `users.id`   | Cascade delete                        |
+| `tenant_id`                       | UUID FK → `tenants.id` | Cascade delete                        |
+| `first_interaction_at`            | TIMESTAMPTZ            | When the relationship was established |
+| `UNIQUE (customer_id, tenant_id)` |                        | One row per customer-vendor pair      |
+
+**Use cases:**
+
+- Created on customer registration (if `tenant_id` supplied) or via `authService.linkCustomerToVendor()` on a customer's first order/visit at a storefront.
+- Vendor dashboard can query "my customers" via `WHERE tenant_id = $1` without scanning the global `users` table.
+- Lets a single customer buy from multiple independent vendors with one login, while still letting each vendor see their own customer list.
 
 ---
 

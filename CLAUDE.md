@@ -14,9 +14,13 @@ all errors and order events are monitored via Slack.
 **Stack:** Node.js 20 + TypeScript 5 · Express.js · PostgreSQL 15 (pg) · Redis (ioredis) ·
 Firebase Firestore (firebase-admin) · JWT + bcrypt · Slack webhooks · Socket.io · Multer
 
-**Status:** Foundation phase — server bootstrap, DB config, response helpers, and Slack
-error notifier are implemented. Routes, controllers, services, and middleware are **not yet
-created** (see Planned Structure below).
+**Status:** Auth module is implemented — Routes/Controllers/Services/Schemas/Middlewares/
+Migrations/Seeds now exist for Customer/Vendor/SuperAdmin register+login (see
+`Src/Routes/Auth.Routes.ts` etc.). Other modules (products, orders, categories) still only
+exist as migrations/seeds — their Routes/Controllers/Services are **not yet created**.
+NOTE: this Status line and the "Planned Structure" / "What Does NOT Exist Yet" sections below
+are stale relative to disk state and due for a fuller audit — treat Directory Layout as
+illustrative, not authoritative; verify against the filesystem for anything load-bearing.
 
 ---
 
@@ -220,8 +224,9 @@ type:[KAN-XX] subject
 
 ### Multi-tenancy
 
-- Every DB table has `tenant_id` scoping all queries
-- Vendors are tenants; customers and products belong to a tenant
+- Every DB table has `tenant_id` scoping all queries — **except** `users` for `Customer`/`SuperAdmin` roles
+- Vendors are tenants; products, categories, and orders belong to a tenant
+- **Customer identity is global (platform-wide), confirmed B2C marketplace model.** One Customer account works across every vendor storefront — no per-vendor login. `customer_vendor_links` (many-to-many, `Src/Migrations/007_customer_vendor_links.sql`) tracks which storefronts a customer has registered/shopped on, decoupled from account identity
 
 ### Auth Flow (to be built)
 
