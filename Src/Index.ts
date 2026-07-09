@@ -7,8 +7,7 @@ import swaggerJsdoc from 'swagger-jsdoc';
 import path from 'path';
 import bodyParser from 'body-parser';
 import responseEnhancer from './Utils/Helpers/ResponseEnhancer';
-import authRoutes from './Routes/Auth.Routes';
-import testRoutes from './Routes/Test.Routes';
+import routes from './Routes/index';
 
 dotenv.config();
 
@@ -35,9 +34,9 @@ export default class Server {
     // Attach res.success / res.error + request logging
     app.use(responseEnhancer);
 
-    // Routes
-    app.use(authRoutes);
-    app.use(testRoutes);
+    // Routes — single combined router; see Src/Routes/index.ts for the
+    // prefix (api/v1 vs api/v2) -> domain router mapping.
+    app.use(routes);
 
     const errorHandler: ErrorRequestHandler = (err, _req, res, _next) => {
       console.error('Error:', err);

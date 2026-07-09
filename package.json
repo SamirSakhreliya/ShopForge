@@ -12,6 +12,9 @@
     "seed": "npm run transpile && node src/db/seed.js",
     "lint": "eslint --ext .ts src",
     "migrate": "npm run transpile && node MigrateDatabase.js",
+    "redis:up": "docker compose up -d redis",
+    "redis:down": "docker compose down",
+    "redis:logs": "docker compose logs -f redis",
     "prepare": "husky"
   },
   "author": "",

@@ -11,7 +11,7 @@ export const customerRegisterSchema = Joi.object({
   last_name: Joi.string().min(1).max(80).required(),
   email: Joi.string().email().required(),
   password: Joi.string().min(8).required(),
-  tenant_id: Joi.string().uuid().optional(), // optional: storefront to auto-link on signup
+  tenant_id: Joi.string().uuid().optional().empty(''), // optional: storefront to auto-link on signup (empty string treated as omitted)
   phone: Joi.string().max(30).optional(),
 });
 
@@ -56,4 +56,25 @@ export const vendorLoginSchema = Joi.object({
 export const superAdminLoginSchema = Joi.object({
   email: Joi.string().email().required(),
   password: Joi.string().required(),
+});
+
+// ─── Refresh / Logout (shared across all roles) ────────────────────────────
+
+export const refreshTokenSchema = Joi.object({
+  refresh_token: Joi.string().required(),
+});
+
+// ─── Email verification (manual review — shared across roles) ─────────────
+
+// SuperAdmin listing filter — GET /verify-email/requests?status=pending
+export const verificationStatusQuerySchema = Joi.object({
+  status: Joi.string()
+    .valid('pending', 'approved', 'rejected')
+    .optional()
+    .empty(''),
+});
+
+// SuperAdmin reject — optional reason
+export const rejectVerificationSchema = Joi.object({
+  note: Joi.string().max(500).allow('').optional(),
 });
