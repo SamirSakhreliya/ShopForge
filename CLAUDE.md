@@ -27,11 +27,20 @@ section below). Routes/Controllers were restructured post-KAN-21 for readability
 & Controllers structure" below): each domain router now exports one Router per URL-prefix
 group with **relative** paths only, and the actual `/api/v1` / `/api/v2` prefix is applied
 centrally in `Src/Routes/index.ts`. Controllers are one function per file under
-`Controllers/<Domain>/`, no controller classes. Orders still only exists as migrations/seeds
-— its Routes/Controllers/Services are **not yet created**.
-NOTE: this Status line and the "Planned Structure" / "What Does NOT Exist Yet" sections below
-are stale relative to disk state and due for a fuller audit — treat Directory Layout as
-illustrative, not authoritative; verify against the filesystem for anything load-bearing.
+`Controllers/<Domain>/`, no controller classes. **Cart & Orders module is implemented as of
+KAN-25** — customer cart (`/api/v2/cart`, spans multiple vendors), checkout that splits a
+multi-vendor cart into one order per tenant (`POST /api/v2/orders/checkout`), customer order
+history (`/api/v2/orders`), and vendor order processing + FIFO order list
+(`/api/v1/vendor/orders`) — see `Src/Routes/Cart.Routes.ts` / `Order.Routes.ts` and the "Cart &
+Order module (KAN-25)" section below. New orders notify the owning vendor on Slack via a
+dedicated `OrderNotifier` (separate webhook/channel from the error notifier). **Vendor Settings
+module is implemented as a KAN-25 follow-up** — `/api/v1/vendor/settings` (GET/PUT) lets a
+vendor manage an allow-listed set of `app_management.app_settings` keys, most notably their own
+`slack_orders_hook` (previously only editable by hand in the DB) — see the "Vendor Settings
+module" section below.
+NOTE: this Status line and the "Planned Structure" section below are otherwise unaudited
+relative to disk state — treat Directory Layout as illustrative, not authoritative; verify
+against the filesystem for anything load-bearing.
 
 ---
 
@@ -52,19 +61,31 @@ ShopForge/
 │   │   ├── Auth.Routes.ts             # Exports CustomerAuthRouter, VendorAuthRouter, SuperAdminAuthRouter (relative paths only)
 │   │   ├── Product.Routes.ts          # Exports PublicProductRouter, VendorProductRouter (relative paths only)
 │   │   ├── Category.Routes.ts         # Exports PublicCategoryRouter, VendorCategoryRouter (relative paths only)
+│   │   ├── Cart.Routes.ts             # Exports CustomerCartRouter (relative paths only) — KAN-25
+│   │   ├── Order.Routes.ts            # Exports CustomerOrderRouter, VendorOrderRouter (relative paths only) — KAN-25
+│   │   ├── AppSettings.Routes.ts      # Exports VendorAppSettingsRouter (relative paths only) — KAN-25 follow-up
 │   │   └── Test.Routes.ts             # RBAC smoke-test stub routes (legacy, absolute paths, mounted as-is)
 │   ├── Controllers/
 │   │   ├── Auth/                      # One file per handler: RegisterCustomer, LoginCustomer, RegisterVendor, LoginVendor, LoginSuperAdmin, RefreshToken, Logout, RequestEmailVerification, ListEmailVerificationRequests, ApproveEmailVerification, RejectEmailVerification
 │   │   ├── Product/                   # One file per handler: ListPublic, GetPublicById, ListVendor, GetVendorById, Create, Update, Delete, UploadImage, DeleteImage, SetPrimaryImage
-│   │   └── Category/                  # One file per handler: ListPublic, GetPublicById, ListVendor, GetVendorById, Create, Update, Delete, CreateWithProducts
+│   │   ├── Category/                  # One file per handler: ListPublic, GetPublicById, ListVendor, GetVendorById, Create, Update, Delete, CreateWithProducts
+│   │   ├── Cart/                      # One file per handler: GetCart, AddItem, UpdateItem, RemoveItem, ClearCart — KAN-25
+│   │   ├── Order/                     # One file per handler: Checkout, ListVendor, GetVendorById, UpdateStatus, ListCustomer, GetCustomerById — KAN-25
+│   │   └── AppSettings/                # One file per handler: GetVendorSettings, UpdateVendorSettings — KAN-25 follow-up
 │   ├── Services/
 │   │   ├── Auth.Service.ts            # Register/login + refresh/logout (token rotation) + email verification request/approve/reject
 │   │   ├── Product.Service.ts         # Listing/CRUD/image logic + Redis cache helpers (+ public invalidateCache() for cross-service use)
-│   │   └── Category.Service.ts        # Listing/CRUD + createCategoryWithProducts (atomic bulk create)
+│   │   ├── Category.Service.ts        # Listing/CRUD + createCategoryWithProducts (atomic bulk create)
+│   │   ├── Cart.Service.ts            # Get-or-create cart, add/update/remove items, live stock validation — KAN-25
+│   │   ├── Order.Service.ts           # checkout() splits cart into 1 order/tenant + vendor/customer listing + status state machine — KAN-25
+│   │   └── AppSettings.Service.ts     # Allow-listed vendor settings get/upsert (VENDOR_SETTING_KEYS) — KAN-25 follow-up
 │   ├── Schemas/
 │   │   ├── Auth.Schema.ts             # + refreshTokenSchema, verificationStatusQuerySchema, rejectVerificationSchema
 │   │   ├── Product.Schema.ts          # createProductSchema, updateProductSchema, publicListQuerySchema, vendorListQuerySchema
-│   │   └── Category.Schema.ts         # createCategorySchema, updateCategorySchema, public/vendorListCategoryQuerySchema, createCategoryWithProductsSchema (nests createProductSchema)
+│   │   ├── Category.Schema.ts         # createCategorySchema, updateCategorySchema, public/vendorListCategoryQuerySchema, createCategoryWithProductsSchema (nests createProductSchema)
+│   │   ├── Cart.Schema.ts             # addCartItemSchema, updateCartItemSchema — KAN-25
+│   │   ├── Order.Schema.ts            # checkoutSchema, vendor/customerListOrdersQuerySchema, updateOrderStatusSchema — KAN-25
+│   │   └── AppSettings.Schema.ts      # updateVendorSettingsSchema (allow-list only) — KAN-25 follow-up
 │   ├── Middlewares/
 │   │   ├── authenticate.ts
 │   │   ├── authorise.ts
@@ -74,7 +95,8 @@ ShopForge/
 │   ├── Utils/
 │   │   └── Helpers/
 │   │       ├── ResponseEnhancer.ts    # Middleware: attaches res.success / res.error
-│   │       └── SlackMessageBuilder.ts # ErrorNotifier class + `errorNotifier` singleton
+│   │       ├── SlackMessageBuilder.ts # ErrorNotifier class + `errorNotifier` singleton
+│   │       └── OrderNotifier.ts       # New-order Slack alerts (separate webhook from errorNotifier) — KAN-25
 │   └── types/
 │       └── express.d.ts               # Express type augmentation (res.success, res.error, req.preferred_language)
 ├── package.json
@@ -294,6 +316,111 @@ Same public/vendor split as Products, over `category_management.categories`:
 
 ---
 
+### Cart & Order module (KAN-25) — `Cart/Order.Routes/Controller/Service/Schema.ts`
+
+**Cart** (`cart_management.carts` / `cart_items`, `Src/Migrations/009_cart.sql`): one cart per
+Customer (global identity, `uq_carts_customer`), and — because Customer identity is global —
+that one cart can already hold items from **multiple different vendors** at once. Unlike
+`order_items`, `cart_items.product_id` is a hard `ON DELETE CASCADE` (not a nullable soft
+reference): a cart is a live pre-purchase intent, not a historical record, so a deleted product
+should simply vanish from any cart referencing it. `cart_items.tenant_id` is denormalized from
+`products.tenant_id` purely so checkout can `GROUP BY tenant_id` without an extra join per row.
+All cart routes live under `/api/v2/cart`, `authenticate` + `authorise(['Customer'])`:
+`GET /` (grouped-by-vendor view with live price/stock joined in), `POST /items` (merges
+quantity if already present), `PUT /items/:productId`, `DELETE /items/:productId`,
+`DELETE /` (clear). Stock is checked against live `products.stock_quantity` on add/update as an
+early UX check — the **authoritative** check happens again at checkout with a row lock (see
+below), since stock can change between "add to cart" and "checkout."
+
+**Checkout / Orders** (`POST /api/v2/orders/checkout`): `order_management.orders` still
+requires exactly one `tenant_id` per order (005_orders.sql), so `OrderService.checkout()`
+**splits a multi-vendor cart into one order per tenant**, all created atomically in a single DB
+transaction — either every vendor's order lands, or none does (same all-or-nothing pattern as
+`CategoryService.createCategoryWithProducts()`). Sequence: `SELECT ... FOR UPDATE OF p` locks
+every referenced product row (ordered by `product_id` to avoid cross-checkout deadlocks) →
+re-validates `is_active` / storefront `active` / live stock per line → groups lines by
+`tenant_id` → per tenant: inserts `orders` + `order_items` (snapshotting `product_name`/`sku`/
+`unit_price` at the live price, same convention as `order_items`) + an initial `pending` row in
+`order_status_history` → guarded decrement
+(`UPDATE ... SET stock_quantity = stock_quantity - $qty WHERE stock_quantity >= $qty`) →
+deletes only the checked-out cart lines → `COMMIT`. Only _after_ commit (never inside the
+transaction, and never allowed to fail the checkout response) does it call
+`authService.linkCustomerToVendor()` and `orderNotifier.notifyNewOrder()` per created order.
+`discount_amount`/`shipping_fee`/`tax_amount` are flat `0` for now (MVP scope — `total_amount`
+currently always equals `subtotal`).
+
+**Vendor order processing** (`/api/v1/vendor/orders`, `authenticate` + `authorise(['Vendor'])`):
+`GET /` lists the vendor's own orders `ORDER BY created_at ASC` (FIFO, per DATABASE.md).
+`GET /:id` returns items + full status history, including `internal_notes` (vendor-only field,
+excluded from the customer-facing query). `PATCH /:id/status` transitions status through a
+hardcoded state machine (`ORDER_TRANSITIONS` in `Order.Service.ts`): `pending → confirmed →
+processing → shipped → delivered`, with `cancelled` reachable from `pending`/`confirmed`/
+`processing` only (not after shipping), and `refunded` only from `delivered`. Illegal
+transitions return `400`. Cancelling restocks every line item back onto its product. Every
+transition is both applied to `orders.status` (+ the relevant timestamp column) and appended to
+`order_status_history`.
+
+**Customer order history** (`/api/v2/orders`, `authenticate` + `authorise(['Customer'])`):
+`GET /` lists the customer's own orders across **every** vendor they've bought from (`ORDER BY
+created_at DESC`), joined with `tenants` for `store_name`. `GET /:id` returns items + status
+history, with `internal_notes` excluded (customer-facing column list is a strict subset of the
+vendor one — see `CUSTOMER_ORDER_COLUMNS` vs `VENDOR_ORDER_COLUMNS` in `Order.Service.ts`).
+There is currently no customer-initiated cancel endpoint — only the vendor-side
+`PATCH .../status` can cancel.
+
+**Slack notifications — `Src/Utils/Helpers/OrderNotifier.ts`:** a class deliberately **separate
+from `errorNotifier`** (`SlackMessageBuilder.ts`) — order alerts post to the `ORDER_SLACK_URL`
+env var, a different webhook/channel than the error-alert one, so a busy order queue never
+drowns out genuine error alerts (or vice versa). Fire-and-forget, called only after the
+checkout transaction has committed — a Slack outage must never fail or delay order placement.
+**Forward-compatible with per-vendor Slack channels:** before falling back to `ORDER_SLACK_URL`,
+`resolveWebhookUrl()` checks `app_settings` for a per-tenant `slack_orders_hook` key, which
+already existed in the schema and seed data (006_app_settings.sql — every seeded tenant already
+has one). "Let each vendor pick their own Slack channel" is now a real, working feature — see
+"Vendor Settings module" below for the API that manages this key. Every send attempt (sent /
+failed / suppressed-if-no-webhook) is logged to `app_management.notifications_log` for
+delivery auditing.
+
+**Gotcha found during KAN-25 testing:** `CUSTOMER_ORDER_COLUMNS`/`VENDOR_ORDER_COLUMNS` are
+`o.`-prefixed constants meant for `SELECT ... FROM orders o` queries. Reusing them in an
+`INSERT ... RETURNING` or `UPDATE ... RETURNING` fails with "missing FROM-clause entry for
+table 'o'" unless the target table itself is aliased — Postgres supports this
+(`INSERT INTO order_management.orders AS o (...) ... RETURNING o.id` /
+`UPDATE order_management.orders AS o SET ... RETURNING o.id`), which is what `checkout()` and
+`updateOrderStatus()` do. Keep this in mind if either constant is reused in a future
+INSERT/UPDATE — plain `SELECT` queries don't need the fix since they already have their own
+`FROM ... o` clause.
+
+---
+
+## Vendor Settings module (KAN-25 follow-up) — `AppSettings.Routes/Controller/Service/Schema.ts`
+
+Closes a gap the Cart & Order module above shipped with: `OrderNotifier` could already _read_ a
+per-tenant `slack_orders_hook` override, but nothing let a vendor _write_ one — the only two
+values in existence were fake placeholder URLs from `005_seed_orders.sql` seed data, editable
+only by hand in the DB.
+
+- **`GET /api/v1/vendor/settings`** (`authenticate` + `authorise(['Vendor'])`): returns every
+  key in `AppSettingsService.VENDOR_SETTING_KEYS` (`slack_orders_hook`, `currency`,
+  `theme_color`, `low_stock_threshold`) for the caller's own `tenant_id`, with `value: null` for
+  any key never set — so a frontend settings form can render without a separate "what keys
+  exist" call.
+- **`PUT /api/v1/vendor/settings`**: upserts one or more of those keys atomically (`ON CONFLICT
+(tenant_id, key) DO UPDATE`). Sending `null`/`""` for a key clears the override — e.g. clearing
+  `slack_orders_hook` makes new-order alerts fall back to the shared `ORDER_SLACK_URL` again.
+- **Allow-list, not arbitrary key/value writes** — `app_management.app_settings` is a shared
+  table that also holds platform-wide rows (`tenant_id IS NULL`, SuperAdmin scope). Both the Joi
+  schema (`updateVendorSettingsSchema`) and the service (`VENDOR_SETTING_KEYS` filter) reject
+  anything outside the allow-list, so a vendor can never write an unrelated or platform-wide key.
+- **`is_public`/`description` are fixed per key** (`SETTING_METADATA` in `AppSettings.Service.ts`)
+  and only asserted on first insert for that tenant+key — a vendor can change the _value_ of
+  `currency` but not whether it's public.
+- **No SuperAdmin or platform-wide settings API yet** — this module is vendor-self-service only,
+  scoped to the caller's own tenant. Managing `tenant_id IS NULL` platform rows (e.g.
+  `maintenance_mode`) still has no API.
+
+---
+
 ## Docker
 
 `docker-compose.yml` (repo root) currently defines one service:
@@ -310,27 +437,28 @@ Redis cache, per KAN-21 follow-up.
 
 ## Environment Variables
 
-| Variable           | Used In                           | Notes                                                    |
-| ------------------ | --------------------------------- | -------------------------------------------------------- |
-| `PORT`             | Server.ts                         | Default 4000                                             |
-| `SERVER_IP`        | Server.ts                         | Default 0.0.0.0                                          |
-| `SWAGGER_IP`       | Src/Index.ts                      | External IP for Swagger server entry                     |
-| `NODE_ENV`         | SlackMessageBuilder               | Shown in Slack alerts                                    |
-| `JWT_SECRET`       | Auth.Service.ts / authenticate.ts | `djsnodcuos_dcsgv_fhn5647*5%44` in dev                   |
-| `DB_HOST`          | db_config.ts                      | `127.0.0.1` in dev                                       |
-| `DB_USER`          | db_config.ts                      | `postgres`                                               |
-| `DB_PASSWORD`      | db_config.ts                      | —                                                        |
-| `DB_PORT`          | db_config.ts                      | `5432`                                                   |
-| `DB_DATABASE_NAME` | db_config.ts                      | `ShopForge`                                              |
-| `SLACK_URL`        | SlackMessageBuilder               | Incoming webhook URL                                     |
-| `REDIS_HOST`       | redis_config.ts                   | `127.0.0.1` in dev (docker-compose service maps to this) |
-| `REDIS_PORT`       | redis_config.ts                   | `6379` in dev                                            |
-| `REDIS_PASSWORD`   | redis_config.ts                   | Empty in dev (no `requirepass` set on the container)     |
-| `ASSETS_URL`       | (future)                          | `http://0.0.0.0:4000/assets`                             |
-| `CATEGORY_ASSETS`  | (future)                          | `/category/`                                             |
-| `BUSINESS_ASSETS`  | (future)                          | `/business/`                                             |
-| `ITEM_ASSETS`      | (future)                          | `/item/`                                                 |
-| `APP_SETTINGS`     | (future)                          | `/app_setting/`                                          |
+| Variable           | Used In                           | Notes                                                                                                                                                       |
+| ------------------ | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `PORT`             | Server.ts                         | Default 4000                                                                                                                                                |
+| `SERVER_IP`        | Server.ts                         | Default 0.0.0.0                                                                                                                                             |
+| `SWAGGER_IP`       | Src/Index.ts                      | External IP for Swagger server entry                                                                                                                        |
+| `NODE_ENV`         | SlackMessageBuilder               | Shown in Slack alerts                                                                                                                                       |
+| `JWT_SECRET`       | Auth.Service.ts / authenticate.ts | `djsnodcuos_dcsgv_fhn5647*5%44` in dev                                                                                                                      |
+| `DB_HOST`          | db_config.ts                      | `127.0.0.1` in dev                                                                                                                                          |
+| `DB_USER`          | db_config.ts                      | `postgres`                                                                                                                                                  |
+| `DB_PASSWORD`      | db_config.ts                      | —                                                                                                                                                           |
+| `DB_PORT`          | db_config.ts                      | `5432`                                                                                                                                                      |
+| `DB_DATABASE_NAME` | db_config.ts                      | `ShopForge`                                                                                                                                                 |
+| `SLACK_URL`        | SlackMessageBuilder               | Incoming webhook URL (errors — see OrderNotifier below)                                                                                                     |
+| `ORDER_SLACK_URL`  | OrderNotifier.ts                  | Incoming webhook URL for new-order alerts (KAN-25) — separate channel from `SLACK_URL`; per-tenant `app_settings.slack_orders_hook` overrides this when set |
+| `REDIS_HOST`       | redis_config.ts                   | `127.0.0.1` in dev (docker-compose service maps to this)                                                                                                    |
+| `REDIS_PORT`       | redis_config.ts                   | `6379` in dev                                                                                                                                               |
+| `REDIS_PASSWORD`   | redis_config.ts                   | Empty in dev (no `requirepass` set on the container)                                                                                                        |
+| `ASSETS_URL`       | (future)                          | `http://0.0.0.0:4000/assets`                                                                                                                                |
+| `CATEGORY_ASSETS`  | (future)                          | `/category/`                                                                                                                                                |
+| `BUSINESS_ASSETS`  | (future)                          | `/business/`                                                                                                                                                |
+| `ITEM_ASSETS`      | (future)                          | `/item/`                                                                                                                                                    |
+| `APP_SETTINGS`     | (future)                          | `/app_setting/`                                                                                                                                             |
 
 ---
 
@@ -501,10 +629,13 @@ These are described in README but not in the codebase:
 
 - `MigrateDatabase.js` / seed runner scripts (`npm run migrate` / `npm run seed` reference
   paths that don't exist yet — migrations/seeds are currently applied manually)
-- Firebase config module (`firebase.ts`)
-- Orders Routes/Controllers/Services
+- Firebase config module (`firebase.ts`) — needed for per-order chat, still unimplemented
 - Automated email sending (verification is currently a fully manual SuperAdmin review step)
 - Logout-all-devices / session-listing for refresh tokens (only single-token revoke exists)
+- Customer-initiated order cancellation (only the vendor-side `PATCH .../status` can cancel — see KAN-25 notes)
+- Real discount/shipping-fee/tax calculation on orders (currently flat `0` — MVP scope)
+- SuperAdmin / platform-wide settings API (`app_settings` rows with `tenant_id IS NULL`, e.g.
+  `maintenance_mode`) — only the vendor-scoped allow-list has an API (`/api/v1/vendor/settings`)
 - Tests (Jest + Supertest)
 - Full app/Postgres containerization (only Redis runs in Docker so far — see Docker section)
 - GitHub Actions workflow

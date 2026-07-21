@@ -17,6 +17,7 @@
 | 5   | `005_orders.sql`                | `orders`, `order_items`, `order_status_history` |
 | 6   | `006_app_settings.sql`          | `app_settings`, `notifications_log`             |
 | 7   | `007_customer_vendor_links.sql` | `customer_vendor_links` (+ alters `users`)      |
+| 8   | `009_cart.sql`                  | `carts`, `cart_items` (KAN-25)                  |
 
 ---
 
@@ -35,6 +36,10 @@ tenants
   │     └── order_status_history  (order_id → orders.id, changed_by → users.id)
   ├── app_settings  (tenant_id → tenants.id)
   └── notifications_log  (tenant_id, user_id, order_id — all optional FKs)
+
+users (Customer)
+  └── carts  (customer_id → users.id — one cart per customer, spans every vendor)
+        └── cart_items  (cart_id → carts.id, product_id → products.id, tenant_id → tenants.id)
 ```
 
 ---
@@ -260,7 +265,10 @@ Key-value runtime configuration, scoped to tenant or platform.
 
 **Use cases:**
 
-- Tenant-level: `currency`, `theme_color`, `slack_orders_hook`, `low_stock_threshold`.
+- Tenant-level: `currency`, `theme_color`, `slack_orders_hook`, `low_stock_threshold`. These four
+  are the only keys a vendor can read/write themselves, via `/api/v1/vendor/settings` (KAN-25
+  follow-up — see `AppSettingsService.VENDOR_SETTING_KEYS`). Every other tenant-level or
+  platform-level row is still DB-edit-only.
 - Platform-level: `platform_version`, `maintenance_mode`.
 - The maintenance mode flag is read at API gateway level to return 503 for non-admin routes.
 
@@ -300,6 +308,34 @@ Many-to-many join between global Customer accounts and the Vendor storefronts (t
 - Created on customer registration (if `tenant_id` supplied) or via `authService.linkCustomerToVendor()` on a customer's first order/visit at a storefront.
 - Vendor dashboard can query "my customers" via `WHERE tenant_id = $1` without scanning the global `users` table.
 - Lets a single customer buy from multiple independent vendors with one login, while still letting each vendor see their own customer list.
+
+---
+
+## Module 8 — Cart (`009_cart.sql`, KAN-25)
+
+### `carts`
+
+One row per Customer. Because Customer identity is global (Module 2), this single cart can already hold items from multiple different vendor storefronts at once — that's what makes a one-checkout, multi-vendor order possible.
+
+| Column        | Type                 | Notes                                            |
+| ------------- | -------------------- | ------------------------------------------------ |
+| `customer_id` | UUID FK → `users.id` | Cascade delete; `UNIQUE` — one cart per customer |
+
+### `cart_items`
+
+| Column                         | Type                    | Notes                                                                                                                                                                                     |
+| ------------------------------ | ----------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `cart_id`                      | UUID FK → `carts.id`    | Cascade delete                                                                                                                                                                            |
+| `product_id`                   | UUID FK → `products.id` | **Hard** `ON DELETE CASCADE` — unlike `order_items.product_id`, a cart is a live pre-purchase intent, not a historical record, so a deleted product should simply disappear from any cart |
+| `tenant_id`                    | UUID FK → `tenants.id`  | Denormalized from `products.tenant_id` — lets checkout `GROUP BY tenant_id` without an extra join                                                                                         |
+| `quantity`                     | INTEGER > 0             |                                                                                                                                                                                           |
+| `UNIQUE (cart_id, product_id)` |                         | Adding an already-present product merges quantity rather than duplicating the row                                                                                                         |
+
+**Use cases:**
+
+- `CartService.getCart()` joins live `products`/`tenants` data (price, stock, `is_active`, storefront status) — the cart never stores its own price/stock snapshot, so it's always current.
+- `OrderService.checkout()` locks every referenced product row (`SELECT ... FOR UPDATE OF p`), re-validates availability, groups by `tenant_id`, and creates **one order per tenant** in a single transaction — see the "Cart & Order module (KAN-25)" section of `CLAUDE.md` for the full sequence.
+- No snapshot fields here (contrast with `order_items`) — by design, since nothing is "historical" until checkout actually creates an order.
 
 ---
 

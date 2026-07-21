@@ -6,6 +6,9 @@ import {
 } from './Auth.Routes';
 import { PublicProductRouter, VendorProductRouter } from './Product.Routes';
 import { PublicCategoryRouter, VendorCategoryRouter } from './Category.Routes';
+import { CustomerCartRouter } from './Cart.Routes';
+import { CustomerOrderRouter, VendorOrderRouter } from './Order.Routes';
+import { VendorAppSettingsRouter } from './AppSettings.Routes';
 import testRoutes from './Test.Routes';
 
 /**
@@ -32,6 +35,18 @@ router.use('/api/v1/vendor/products', VendorProductRouter);
 // ─── Categories ──────────────────────────────────────────────────────────────
 router.use('/api/v2/categories', PublicCategoryRouter);
 router.use('/api/v1/vendor/categories', VendorCategoryRouter);
+
+// ─── Cart & Orders (KAN-25) ─────────────────────────────────────────────────
+router.use('/api/v2/cart', CustomerCartRouter);
+router.use('/api/v2/orders', CustomerOrderRouter);
+router.use('/api/v1/vendor/orders', VendorOrderRouter);
+
+// ─── Vendor Settings (KAN-25 follow-up) ────────────────────────────────────
+// Closes the gap OrderNotifier's resolveWebhookUrl() forward-compat comment
+// flagged: vendors can now actually set their own slack_orders_hook (and a
+// few other allow-listed settings) instead of it only being editable by hand
+// in the DB.
+router.use('/api/v1/vendor/settings', VendorAppSettingsRouter);
 
 // ─── RBAC smoke-test routes (legacy, self-contained absolute paths) ───────
 // NOTE: Test.Routes.ts declares its own stub `GET /api/v2/products` for RBAC

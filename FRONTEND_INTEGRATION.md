@@ -1,6 +1,6 @@
 # ShopForge — Frontend Integration Guide
 
-> **Last updated:** 2026-07-03 (refresh tokens, Category module, email verification)
+> **Last updated:** 2026-07-09 (KAN-25: Cart & Orders module + Vendor Settings follow-up)
 > **Update this file whenever a new endpoint ships, an existing one changes shape, or a
 > module moves from "planned" to "implemented."** Add a new `##` section per feature/module
 > rather than editing old sections away — frontend engineers may be mid-integration against
@@ -271,9 +271,153 @@ is `{ category, products: [...] }`. Only one level of category nesting is suppor
 
 ---
 
-## 5. Known gaps (as of this doc's last update)
+## 5. Cart & Orders module (KAN-25)
+
+### 5a. Cart — `/api/v2/cart` 🔒 (Customer role)
+
+A Customer has exactly **one cart**, and — because Customer identity is global — that one
+cart can hold items from **multiple different vendors at once**. Checkout later splits it into
+one order per vendor (see §5b).
+
+| Method | Path                            | Notes                                                   |
+| ------ | ------------------------------- | ------------------------------------------------------- |
+| GET    | `/api/v2/cart`                  | Cart contents, grouped by vendor, with live price/stock |
+| POST   | `/api/v2/cart/items`            | Add a product (merges quantity if already in cart)      |
+| PUT    | `/api/v2/cart/items/:productId` | Set the quantity of one line                            |
+| DELETE | `/api/v2/cart/items/:productId` | Remove one line                                         |
+| DELETE | `/api/v2/cart`                  | Empty the entire cart                                   |
+
+`POST /api/v2/cart/items` body: `{ "product_id": "uuid", "quantity": 1 }` (`quantity` defaults
+to `1`). Returns `409` if the requested quantity exceeds live `stock_quantity` — this is a
+soft/early check; the authoritative, race-free check happens again at checkout.
+
+`GET /api/v2/cart` response `data` shape:
+
+```json
+{
+  "cart_id": "...",
+  "items": [
+    {
+      "product_id": "...",
+      "tenant_id": "...",
+      "quantity": 2,
+      "price": 19.99,
+      "...": "..."
+    }
+  ],
+  "vendors": [
+    {
+      "tenant_id": "...",
+      "store_name": "...",
+      "items": ["..."],
+      "subtotal": 39.98
+    }
+  ],
+  "subtotal": 39.98
+}
+```
+
+### 5b. Checkout — `POST /api/v2/orders/checkout` 🔒 (Customer role)
+
+Checks out the **entire** cart. If the cart spans multiple vendors, this creates **one order
+per vendor**, atomically — either every vendor's order is created, or (e.g. one vendor's item
+just went out of stock) none is, and the whole cart is left untouched.
+
+Body:
+
+```json
+{
+  "shipping_name": "Jane Doe",
+  "shipping_phone": "+1-415-555-0100",
+  "shipping_address": "301 Green St, Apt 4B",
+  "shipping_city": "San Francisco",
+  "shipping_country": "US",
+  "shipping_zip": "94133",
+  "payment_method": "cash_on_delivery",
+  "notes": "optional"
+}
+```
+
+All shipping fields are required; `payment_method` defaults to `cash_on_delivery` if omitted
+(one of `card` / `cash_on_delivery` / `wallet` / `bank_transfer`). Response `data.orders` is
+**always an array**, even when the cart only had one vendor's items in it. Returns `400` if the
+cart is empty, `409` if any line item is no longer available or out of stock (nothing is
+created in that case — try again after adjusting the cart).
+
+The owning vendor(s) get a Slack alert per created order automatically — no frontend action
+needed.
+
+### 5c. Customer order history — `/api/v2/orders` 🔒 (Customer role)
+
+| Method | Path                 | Notes                                                                                     |
+| ------ | -------------------- | ----------------------------------------------------------------------------------------- |
+| GET    | `/api/v2/orders`     | Every order across every vendor, newest first. Optional `?status=` filter, `page`/`limit` |
+| GET    | `/api/v2/orders/:id` | One order's detail — items + status history                                               |
+
+There is currently **no customer-initiated cancel endpoint** — cancellation is vendor-side only
+(see §5d). If you need a "cancel my order" button, it isn't wired up yet.
+
+### 5d. Vendor order processing — `/api/v1/vendor/orders` 🔒 (Vendor role)
+
+| Method | Path                               | Notes                                                                                              |
+| ------ | ---------------------------------- | -------------------------------------------------------------------------------------------------- |
+| GET    | `/api/v1/vendor/orders`            | The vendor's own orders, **oldest first** (FIFO queue). Optional `?status=` filter, `page`/`limit` |
+| GET    | `/api/v1/vendor/orders/:id`        | One order's detail — items + status history (includes vendor-only `internal_notes`)                |
+| PATCH  | `/api/v1/vendor/orders/:id/status` | Transition the order to a new status                                                               |
+
+`PATCH .../status` body: `{ "status": "confirmed", "note": "optional", "tracking_number": "optional, relevant when status = shipped" }`.
+
+Allowed transitions (anything else returns `400`):
+
+```
+pending → confirmed → processing → shipped → delivered
+   └───────────────────────────────────────→ cancelled   (not after shipped)
+                                   delivered → refunded
+```
+
+Cancelling an order automatically restocks every line item back onto its product.
+
+---
+
+## 6. Vendor Settings module (KAN-25 follow-up) — `/api/v1/vendor/settings` 🔒 (Vendor role)
+
+Lets a vendor manage a small allow-listed set of their own `app_settings` — most notably
+`slack_orders_hook`, which controls where §5's "new order" Slack alert gets sent for their
+storefront specifically (falls back to the platform's shared webhook if unset).
+
+| Method | Path                      | Notes                                                    |
+| ------ | ------------------------- | -------------------------------------------------------- |
+| GET    | `/api/v1/vendor/settings` | Returns all 4 allow-listed keys, `value: null` if unset  |
+| PUT    | `/api/v1/vendor/settings` | Upsert one or more keys (send only what you're changing) |
+
+Allow-listed keys — nothing outside this list can be read or written through this endpoint:
+
+| Key                   | Type               | Notes                                             |
+| --------------------- | ------------------ | ------------------------------------------------- |
+| `slack_orders_hook`   | string (https URL) | Per-storefront Slack webhook for new-order alerts |
+| `currency`            | string (3 letters) | ISO 4217 code, e.g. `USD`                         |
+| `theme_color`         | string (hex)       | e.g. `#1a56db`                                    |
+| `low_stock_threshold` | integer            | Alert when `stock_quantity` falls below this      |
+
+`PUT` body — any subset of the four keys:
+
+```json
+{ "slack_orders_hook": "https://hooks.slack.com/services/T000/B000/xxxxxxxx" }
+```
+
+Send `null` or `""` for a key to clear it (e.g. clear `slack_orders_hook` to fall back to the
+platform-wide webhook again). Response `data.settings` is always the full array of 4 keys with
+their current values, same shape as `GET`.
+
+---
+
+## 7. Known gaps (as of this doc's last update)
 
 - No "logout all devices" or session-listing endpoint — only single-refresh-token revoke.
 - No automated email sending — verification approval/rejection is a fully manual SuperAdmin
   review step (see §2.5). Wiring an actual email provider is a separate, later piece of work.
-- No Orders API yet.
+- No customer-initiated order cancellation — only the vendor can cancel (§5d).
+- Orders don't yet calculate real discount/shipping-fee/tax — all three are flat `0` for now,
+  so `total_amount` always equals `subtotal`.
+- No SuperAdmin / platform-wide settings API yet — only the vendor-scoped allow-list in §6 has
+  an endpoint; platform rows like `maintenance_mode` are still DB-edit-only.
